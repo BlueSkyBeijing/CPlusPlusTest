@@ -1,10 +1,5 @@
 ﻿
 
-#include <stdio.h>
-#define SUM(a,b) a+b
-#define arrLen(arr) sizeof(arr)/sizeof(arr[0])
-
-
 #define SHADER_DECLARE_VTABLE(ShaderClass) \\
 	static FShader* ConstructSerializedInstance() { return new ShaderClass(); } \\
 	static FShader* ConstructCompiledInstance(const typename FShader::CompiledShaderInitializerType& Initializer) \\
@@ -245,13 +240,5 @@ SHADER_PARAMETER(FVector, DirectionalLightColor) \\
 
 
 int main() {
-    int c = 3, d = 4;
-    int sum = SUM(c, d);
-    printf("sum=%d", sum);
-    int data[] = { 5,6,8,9,6,4 };
-    for (int i = 0; i < arrLen(data); i++)
-    {
-        printf("%d\\n", data[i]);
-    }
     return 0;
 }
