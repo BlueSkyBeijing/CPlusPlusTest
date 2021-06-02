@@ -89,6 +89,161 @@
 
 DECLARE_SHADER_TYPE(TMobileBasePassVS, MeshMaterial)
 
+
+
+#define SHADER_TYPE_VTABLE(ShaderClass) \\
+	ShaderClass::ConstructSerializedInstance, \\
+	ShaderClass::ConstructCompiledInstance, \\
+	ShaderClass::ModifyCompilationEnvironmentImpl, \\
+	ShaderClass::ShouldCompilePermutationImpl, \\
+	ShaderClass::ValidateCompiledResult
+
+#define INTERNAL_IMPLEMENT_TYPE_LAYOUT_COMMON(TemplatePrefix, T) \\
+	PREPROCESSOR_REMOVE_OPTIONAL_PARENS(TemplatePrefix) FTypeLayoutDesc& PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)::StaticGetTypeLayout() { \\
+		static_assert(TValidateInterfaceHelper<PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T), InterfaceType>::Value, "Invalid interface for " #T); \\
+		alignas(FTypeLayoutDesc) static uint8 TypeBuffer[sizeof(FTypeLayoutDesc)] = { 0 }; \\
+		FTypeLayoutDesc& TypeDesc = *(FTypeLayoutDesc*)TypeBuffer; \\
+		if (!TypeDesc.IsInitialized) { \\
+			TypeDesc.IsInitialized = true; \\
+			TypeDesc.Name = TEXT(#T); \\
+			TypeDesc.WriteFrozenMemoryImageFunc = TGetFreezeImageHelper<PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)>::Do(); \\
+			TypeDesc.UnfrozenCopyFunc = &Freeze::DefaultUnfrozenCopy; \\
+			TypeDesc.AppendHashFunc = &Freeze::DefaultAppendHash; \\
+			TypeDesc.GetTargetAlignmentFunc = &Freeze::DefaultGetTargetAlignment; \\
+			TypeDesc.ToStringFunc = &Freeze::DefaultToString; \\
+			TypeDesc.Size = sizeof(PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)); \\
+			TypeDesc.Alignment = alignof(PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)); \\
+			TypeDesc.Interface = InterfaceType; \\
+			TypeDesc.SizeFromFields = ~0u; \\
+			TAssignDestroyHelper<PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T), TIsTriviallyDestructible<PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)>::Value>::Do(TypeDesc); \\
+			TypeDesc.GetDefaultObjectFunc = &TGetDefaultObjectHelper<PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T), InterfaceType>::Do; \\
+			InternalLinkType<1>::Initialize(TypeDesc); \\
+			InternalInitializeBases<PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)>(TypeDesc); \\
+			FTypeLayoutDesc::Initialize(TypeDesc); \\
+		} \\
+		return TypeDesc; }
+
+
+#define IMPLEMENT_UNREGISTERED_TEMPLATE_TYPE_LAYOUT(TemplatePrefix, T) \\
+	INTERNAL_IMPLEMENT_TYPE_LAYOUT_COMMON(TemplatePrefix, T); \\
+	PREPROCESSOR_REMOVE_OPTIONAL_PARENS(TemplatePrefix) const FTypeLayoutDesc& PREPROCESSOR_REMOVE_OPTIONAL_PARENS(T)::GetTypeLayout() const { return StaticGetTypeLayout(); }
+
+
+/** A macro to implement a shader type. */
+#define IMPLEMENT_SHADER_TYPE(TemplatePrefix,ShaderClass,SourceFilename,FunctionName,Frequency) \\
+	IMPLEMENT_UNREGISTERED_TEMPLATE_TYPE_LAYOUT(TemplatePrefix, ShaderClass); \\
+	TemplatePrefix \\
+	ShaderClass::ShaderMetaType ShaderClass::StaticType( \\
+		ShaderClass::StaticGetTypeLayout(), \\
+		TEXT(#ShaderClass), \\
+		SourceFilename, \\
+		FunctionName, \\
+		Frequency, \\
+		ShaderClass::FPermutationDomain::PermutationCount, \\
+		SHADER_TYPE_VTABLE(ShaderClass), \\
+		sizeof(ShaderClass), \\
+		ShaderClass::GetRootParametersMetadata() \\
+		);
+
+/** A macro to implement material shaders. */
+#define IMPLEMENT_MATERIAL_SHADER_TYPE(TemplatePrefix,ShaderClass,SourceFilename,FunctionName,Frequency) \\
+	IMPLEMENT_SHADER_TYPE( \\
+		TemplatePrefix, \\
+		ShaderClass, \\
+		SourceFilename, \\
+		FunctionName, \\
+		Frequency \\
+		);
+
+
+#define IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_VERTEX_SHADER_TYPE(LightMapPolicyType,LightMapPolicyName) \\
+	typedef TMobileBasePassVS< LightMapPolicyType, LDR_GAMMA_32 > TMobileBasePassVS##LightMapPolicyName##LDRGamma32; \\
+	typedef TMobileBasePassVS< LightMapPolicyType, HDR_LINEAR_64 > TMobileBasePassVS##LightMapPolicyName##HDRLinear64; \\
+	IMPLEMENT_MATERIAL_SHADER_TYPE(template<>, TMobileBasePassVS##LightMapPolicyName##LDRGamma32, TEXT("/Engine/Private/MobileBasePassVertexShader.usf"), TEXT("Main"), SF_Vertex); \\
+	IMPLEMENT_MATERIAL_SHADER_TYPE(template<>, TMobileBasePassVS##LightMapPolicyName##HDRLinear64, TEXT("/Engine/Private/MobileBasePassVertexShader.usf"), TEXT("Main"), SF_Vertex);
+
+#define IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType,LightMapPolicyName,NumMovablePointLights) \\
+	typedef TMobileBasePassPS< LightMapPolicyType, LDR_GAMMA_32, false, NumMovablePointLights > TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##LDRGamma32; \\
+	typedef TMobileBasePassPS< LightMapPolicyType, HDR_LINEAR_64, false, NumMovablePointLights > TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##HDRLinear64; \\
+	typedef TMobileBasePassPS< LightMapPolicyType, LDR_GAMMA_32, true, NumMovablePointLights > TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##LDRGamma32##Skylight; \\
+	typedef TMobileBasePassPS< LightMapPolicyType, HDR_LINEAR_64, true, NumMovablePointLights > TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##HDRLinear64##Skylight; \\
+	IMPLEMENT_MATERIAL_SHADER_TYPE(template<>, TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##LDRGamma32, TEXT("/Engine/Private/MobileBasePassPixelShader.usf"), TEXT("Main"), SF_Pixel); \\
+	IMPLEMENT_MATERIAL_SHADER_TYPE(template<>, TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##HDRLinear64, TEXT("/Engine/Private/MobileBasePassPixelShader.usf"), TEXT("Main"), SF_Pixel); \\
+	IMPLEMENT_MATERIAL_SHADER_TYPE(template<>, TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##LDRGamma32##Skylight, TEXT("/Engine/Private/MobileBasePassPixelShader.usf"), TEXT("Main"), SF_Pixel); \\
+	IMPLEMENT_MATERIAL_SHADER_TYPE(template<>, TMobileBasePassPS##LightMapPolicyName##NumMovablePointLights##HDRLinear64##Skylight, TEXT("/Engine/Private/MobileBasePassPixelShader.usf"), TEXT("Main"), SF_Pixel);
+
+// Permutations for the number of point lights to support. INT32_MAX indicates the shader should use branching to support a variable number of point lights.
+#define IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(LightMapPolicyType,LightMapPolicyName) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_VERTEX_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName, 0) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName, 1) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName, 2) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName, 3) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName, 4) \\
+	IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_PIXEL_SHADER_TYPE(LightMapPolicyType, LightMapPolicyName, INT32_MAX)
+
+// Implement shader types per lightmap policy 
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_NO_LIGHTMAP>, FNoLightMapPolicy);
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_LQ_LIGHTMAP>, TLightMapPolicyLQ);
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_CACHED_POINT_INDIRECT_LIGHTING>, FCachedPointIndirectLightingPolicy);
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_MOBILE_DISTANCE_FIELD_SHADOWS_AND_LQ_LIGHTMAP>, FMobileDistanceFieldShadowsAndLQLightMapPolicy);
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_MOBILE_DIRECTIONAL_LIGHT_AND_SH_INDIRECT>, FMobileDirectionalLightAndSHIndirectPolicy);
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_MOBILE_MOVABLE_DIRECTIONAL_LIGHT_AND_SH_INDIRECT>, FMobileMovableDirectionalLightAndSHIndirectPolicy);
+IMPLEMENT_MOBILE_SHADING_BASEPASS_LIGHTMAPPED_SHADER_TYPE(TUniformLightMapPolicy<LMP_MOBILE_MOVABLE_DIRECTIONAL_LIGHT_WITH_LIGHTMAP>, FMobileMovableDirectionalLightWithLightmapPolicy);
+
+
+
+
+
+/** Declares a member of a uniform buffer struct. */
+#define INTERNAL_SHADER_PARAMETER_EXPLICIT(BaseType,TypeInfo,MemberType,MemberName,ArrayDecl,DefaultValue,Precision,OptionalShaderType,IsMemberStruct) \\
+		zzMemberId##MemberName; \\
+	public: \\
+		TypeInfo::TAlignedType MemberName DefaultValue; \\
+		static_assert(BaseType != UBMT_INVALID, "Invalid type " #MemberType " of member " #MemberName "."); \\
+	private: \\
+		struct zzNextMemberId##MemberName { enum { HasDeclaredResource = zzMemberId##MemberName::HasDeclaredResource || !TypeInfo::bIsStoredInConstantBuffer }; }; \\
+		static zzFuncPtr zzAppendMemberGetPrev(zzNextMemberId##MemberName, TArray<FShaderParametersMetadata::FMember>* Members) \\
+		{ \\
+			static_assert(TypeInfo::bIsStoredInConstantBuffer || TIsArrayOrRefOfType<decltype(OptionalShaderType), TCHAR>::Value, "No shader type for " #MemberName "."); \\
+			static_assert(\\
+				(STRUCT_OFFSET(zzTThisStruct, MemberName) & (TypeInfo::Alignment - 1)) == 0, \\
+				"Misaligned uniform buffer struct member " #MemberName "."); \\
+			Members->Add(FShaderParametersMetadata::FMember( \\
+				TEXT(#MemberName), \\
+				OptionalShaderType, \\
+				STRUCT_OFFSET(zzTThisStruct,MemberName), \\
+				EUniformBufferBaseType(BaseType), \\
+				Precision, \\
+				TypeInfo::NumRows, \\
+				TypeInfo::NumColumns, \\
+				TypeInfo::NumElements, \\
+				TypeInfo::GetStructMetadata() \\
+				)); \\
+			zzFuncPtr(*PrevFunc)(zzMemberId##MemberName, TArray<FShaderParametersMetadata::FMember>*); \\
+			PrevFunc = zzAppendMemberGetPrev; \\
+			return (zzFuncPtr)PrevFunc; \\
+		} \\
+		typedef zzNextMemberId##MemberName
+
+
+#define SHADER_PARAMETER_EX(MemberType,MemberName,Precision) \\
+	INTERNAL_SHADER_PARAMETER_EXPLICIT(TShaderParameterTypeInfo<MemberType>::BaseType, TShaderParameterTypeInfo<MemberType>, MemberType,MemberName,,,Precision,TEXT(""),false)
+
+
+/** Adds a constant-buffer stored value.
+ *
+ * Example:
+ *	SHADER_PARAMETER(float, MyScalar)
+ *	SHADER_PARAMETER(FMatrix, MyMatrix)
+ */
+#define SHADER_PARAMETER(MemberType,MemberName) \\
+	SHADER_PARAMETER_EX(MemberType,MemberName,EShaderPrecisionModifier::Float)
+
+SHADER_PARAMETER(FVector, DirectionalLightDirection) \\
+SHADER_PARAMETER(FVector, DirectionalLightColor) \\
+
+
 int main() {
     int c = 3, d = 4;
     int sum = SUM(c, d);
